@@ -1,0 +1,67 @@
+name: Service Creation Request
+description: Create a new microservice with SuperClaude architect
+title: "[SERVICE] "
+labels: ["service-type", "architect", "automation"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Service Creation Request
+        This issue will trigger the SuperClaude architect persona to create a new service.
+        
+  - type: input
+    id: service-name
+    attributes:
+      label: Service Name
+      description: Name of the service to create
+      placeholder: "e.g., user-service, payment-service"
+    validations:
+      required: true
+      
+  - type: textarea
+    id: service-description
+    attributes:
+      label: Service Description
+      description: Detailed description of what this service should do
+      placeholder: "This service should handle..."
+    validations:
+      required: true
+      
+  - type: textarea
+    id: features
+    attributes:
+      label: Required Features
+      description: List the main features this service needs
+      placeholder: |
+        - User authentication
+        - CRUD operations for X
+        - Integration with Y
+    validations:
+      required: true
+      
+  - type: textarea
+    id: technical-requirements
+    attributes:
+      label: Technical Requirements (Optional)
+      description: Any specific technical requirements or constraints
+      placeholder: |
+        - Must integrate with existing PostgreSQL database
+        - Should support horizontal scaling
+        - API response time < 200ms
+    validations:
+      required: false
+      
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Service creation priority
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+      default: 2
+    validations:
+      required: true

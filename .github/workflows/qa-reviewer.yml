@@ -1,0 +1,172 @@
+name: QA Review Process
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  qa-review:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Run Tests
+        id: test
+        continue-on-error: true
+        run: |
+          # Detect and run appropriate test command
+          if [ -f "package.json" ]; then
+            npm ci && npm test
+          elif [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt && pytest
+          elif [ -f "go.mod" ]; then
+            go test ./...
+          else
+            echo "No recognized test framework found"
+          fi
+          echo "test_status=$?" >> $GITHUB_OUTPUT
+          
+      - name: Run Linter
+        id: lint
+        continue-on-error: true
+        run: |
+          # Detect and run appropriate lint command
+          if [ -f "package.json" ]; then
+            npm run lint || npx eslint .
+          elif [ -f "requirements.txt" ]; then
+            pip install flake8 black && flake8 . && black --check .
+          elif [ -f "go.mod" ]; then
+            go fmt ./... && go vet ./...
+          else
+            echo "No recognized linter found"
+          fi
+          echo "lint_status=$?" >> $GITHUB_OUTPUT
+          
+      - name: Prepare QA prompt
+        run: |
+          cat > /tmp/qa-prompt.txt << 'PROMPT_EOF'
+          You are the QA persona. Review this pull request thoroughly:
+          
+          PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
+          
+          Changed files: ${{ github.event.pull_request.changed_files }}
+          Additions: ${{ github.event.pull_request.additions }}
+          Deletions: ${{ github.event.pull_request.deletions }}
+          
+          Tasks:
+          1. Review code quality and best practices
+          2. Check test coverage and quality
+          3. Verify documentation completeness
+          4. Identify potential bugs or security issues
+          5. Suggest improvements if needed
+          
+          Test Status: ${{ steps.test.outputs.test_status == '0' && 'PASSED' || 'FAILED' }}
+          Lint Status: ${{ steps.lint.outputs.lint_status == '0' && 'PASSED' || 'FAILED' }}
+          
+          Provide a detailed review with:
+          - Approval status (APPROVE/REQUEST_CHANGES)
+          - Specific feedback on code quality
+          - Any critical issues found
+          - Suggestions for improvement
+          PROMPT_EOF
+          
+      - name: Run SuperClaude QA Review
+        id: qa_review
+        uses: anthropics/claude-code-github-action@main
+        with:
+          prompt-file: /tmp/qa-prompt.txt
+          model: opus
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ secrets.ORG_ADMIN_TOKEN }}
+          working-directory: .
+          flags: |
+            --persona qa
+            --mode review
+            --thorough
+            
+      - name: Post Review Comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.ORG_ADMIN_TOKEN }}
+          script: |
+            const testPassed = '${{ steps.test.outputs.test_status }}' === '0';
+            const lintPassed = '${{ steps.lint.outputs.lint_status }}' === '0';
+            
+            // Determine if we should approve or request changes
+            const shouldApprove = testPassed && lintPassed;
+            
+            const review = await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              event: shouldApprove ? 'APPROVE' : 'REQUEST_CHANGES',
+              body: `
+              ## 🔍 QA Review Results
+              
+              ### Test Results
+              ${testPassed ? '✅ All tests passed' : '❌ Tests failed - needs fixing'}
+              
+              ### Lint Results
+              ${lintPassed ? '✅ Code style checks passed' : '⚠️ Linting issues found'}
+              
+              ### SuperClaude QA Analysis
+              The QA persona has reviewed this PR and provided detailed feedback above.
+              
+              ${shouldApprove ? 
+                '### ✅ Approved for Merge\nThis PR meets all quality standards and is ready for automatic merge.' : 
+                '### 🔄 Changes Requested\nPlease address the issues identified above before this PR can be merged.'}
+              `
+            });
+            
+            // Add appropriate labels
+            const labels = shouldApprove ? 
+              ['qa-approved', 'ready-to-merge'] : 
+              ['needs-work', 'qa-feedback'];
+              
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: labels
+            });
+            
+      - name: Auto-merge if approved
+        if: steps.test.outputs.test_status == '0' && steps.lint.outputs.lint_status == '0'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.ORG_ADMIN_TOKEN }}
+          script: |
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              merge_method: 'squash'
+            });
+            
+      - name: Trigger fix workflow if changes needed
+        if: steps.test.outputs.test_status != '0' || steps.lint.outputs.lint_status != '0'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.ORG_ADMIN_TOKEN }}
+          script: |
+            // Create an issue for the developer to fix
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Fix PR #${context.payload.pull_request.number} - QA Feedback`,
+              body: `
+              The QA review found issues in PR #${context.payload.pull_request.number}
+              
+              Please address the feedback and update the PR.
+              
+              - Test Status: ${testPassed ? 'PASSED' : 'FAILED'}
+              - Lint Status: ${lintPassed ? 'PASSED' : 'FAILED'}
+              
+              Check the PR comments for detailed feedback.
+              `,
+              labels: ['bug-fix', 'automated', 'implementation']
+            });

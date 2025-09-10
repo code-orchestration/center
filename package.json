@@ -1,0 +1,24 @@
+{
+  "name": "code-orchestration-center",
+  "version": "1.0.0",
+  "description": "Central orchestration for SuperClaude code automation",
+  "main": "index.js",
+  "scripts": {
+    "setup": "npm install",
+    "create-repo": "node .github/scripts/create-service-repos.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/code-orchestration/center.git"
+  },
+  "keywords": [
+    "automation",
+    "superclaude",
+    "orchestration"
+  ],
+  "author": "Code Orchestration Team",
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/rest": "^20.0.2"
+  }
+}
