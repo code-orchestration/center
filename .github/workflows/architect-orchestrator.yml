@@ -13,6 +13,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install dependencies
+        run: |
+          npm install @octokit/rest
+          
       - name: Set up environment
         run: |
           echo "Setting up environment variables"
@@ -31,49 +40,55 @@ jobs:
           
           # Create a structured prompt for SuperClaude
           cat > /tmp/architect-prompt.txt << 'PROMPT_EOF'
-          You are the System Architect persona. Analyze this service request and perform the following tasks:
+          Analyze this service request and provide a detailed technical specification:
           
           Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
           
           ${{ github.event.issue.body }}
           
-          Tasks to complete:
-          1. Create appropriate repositories for this service (may be multiple if needed)
-          2. Determine the best technology stack (language, framework, database)
-          3. Create detailed issues in each repository for implementation
-          4. Set up CI/CD pipelines with lint and test configurations
-          5. Create a comprehensive architecture document
+          Please provide:
+          1. Service Name: [exact name for the repository]
+          2. Technology Stack: [language, framework, database]
+          3. Architecture Pattern: [microservice, monolith, serverless, etc.]
+          4. Key Components: [list main components]
+          5. Implementation Features: [list of features to implement as separate issues]
           
-          Use your best judgment for technology choices based on the requirements.
+          Format your response clearly so it can be parsed.
           PROMPT_EOF
           
       - name: Run SuperClaude Architect
-        uses: anthropics/claude-code-github-action@main
-        with:
-          prompt-file: /tmp/architect-prompt.txt
-          model: opus
-          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github-token: ${{ secrets.ORG_ADMIN_TOKEN }}
-          working-directory: .
-          flags: |
-            --persona architect
-            --mode system-design
-            --ultrathink
-            
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ORG_ADMIN_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+        run: |
+          node .github/scripts/run-superclaude.js architect /tmp/architect-prompt.txt create-service
+          
       - name: Comment on issue with results
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.ORG_ADMIN_TOKEN }}
           script: |
             const issueNumber = context.issue.number;
+            const fs = require('fs');
+            
+            let responseText = 'Service creation initiated.';
+            try {
+              responseText = fs.readFileSync('/tmp/superclaude-response.txt', 'utf8');
+            } catch (e) {
+              console.log('Could not read response file');
+            }
+            
             const body = `
             ## 🏗️ Architect Analysis Complete
             
             The SuperClaude Architect has analyzed your service request and initiated the creation process.
             
-            Check the following for updates:
+            ### Analysis Results:
+            ${responseText.substring(0, 2000)}
+            
+            ### Next Steps:
             - New repositories created in the organization
-            - Issues created in each repository
+            - Implementation issues created in each repository
             - CI/CD pipelines configured
             
             The development phase will begin automatically once repositories are set up.
